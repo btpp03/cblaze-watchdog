@@ -9,7 +9,7 @@ CloudBlaze 免费 Minecraft 实例（`btppcn` / `cb521bab`）的看门狗。
 
 ## 做什么
 
-每 6 小时（cron-job.org 外部触发）：
+每小时（cron-job.org 外部触发）：
 
 1. TCP 探 `free.cloudblaze.org:10446` 是否活着
 2. 走面板 API 查 `current_state`

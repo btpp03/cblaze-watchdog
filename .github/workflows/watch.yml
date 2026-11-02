@@ -1,11 +1,11 @@
 name: cblaze-watchdog
 
-# 免费实例看门狗：每 6 小时探一次，停了就 power start
+# 免费实例看门狗：每小时探一次，停了就 power start
 # 外部触发腿：cron-job.org 定时打 workflow_dispatch（GitHub 原生 schedule 常不 fire）
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '17 * * * *'
 
 concurrency:
   group: cblaze-watchdog
