@@ -199,8 +199,8 @@ def main():
             al = mc_alive()
             log(f"attempt{attempt} check {i + 1}: state={st2} mem={mem2} mc={'up' if al else 'down'}")
             if st2 == "running" and al:
-                tg(f"🔧 CloudBlaze 看门狗：免费服被停了（原 state={st}），已自动拉起 ✅\n"
-                   f"MC ping 正常，hy2/哪吒随之恢复。")
+                # 平台会周期性把免费服关掉，拉起成功属常态 —— 只记日志不推 TG，避免每刻刷屏
+                log(f"已拉起成功（原 state={st}），静默不通知")
                 print("result: restarted ok")
                 return 0
             if st2 == "starting" and not mem2:
