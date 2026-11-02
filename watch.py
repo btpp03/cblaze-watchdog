@@ -28,6 +28,9 @@ import urllib.request
 import http.cookiejar
 from datetime import datetime, timedelta, timezone
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bpc  # axelot __BPC 挑战求解器（同目录）
+
 PANEL = "https://panel.cloudblaze.org"
 SID = os.environ.get("CBLZ_SID", "cb521bab").strip()
 HOST = os.environ.get("CBLZ_HOST", "free.cloudblaze.org").strip()
@@ -67,6 +70,10 @@ def build_opener():
     cj = http.cookiejar.CookieJar()
     xsrf = ""
     for c in cookies:
+        # 只留登录态；__bp_* / __ddg* 是 IP+时效绑定的，带旧的一起发反而会被判无效
+        # 让请求重新触发挑战，由 bpc.solve() 现拿一份新的
+        if c["name"].startswith(("__bp", "__ddg")):
+            continue
         dom = c["domain"]
         if not dom.startswith("."):
             dom = "." + dom
@@ -84,8 +91,19 @@ def build_opener():
 
 
 def api(op, xsrf, path, method="GET", body=None):
+    code, txt = _api_raw(op, xsrf, path, method, body)
+    if code == 403 and "__BPC" in txt:
+        # 走了没被放行的出口 IP（比如 GitHub runner）会先撞上 axelot 的
+        # 指纹 + PoW 挑战页；解掉拿 __bp_verified，再重放原请求
+        log("hit bot challenge, solving...")
+        bpc.solve(op, PANEL, path)
+        code, txt = _api_raw(op, xsrf, path, method, body)
+    return code, txt
+
+
+def _api_raw(op, xsrf, path, method="GET", body=None):
     req = urllib.request.Request(PANEL + path, data=body, method=method)
-    req.add_header("User-Agent", UA)
+    req.add_header("User-Agent", bpc.UA)
     req.add_header("Accept", "application/json")
     req.add_header("X-Requested-With", "XMLHttpRequest")
     if body is not None:
