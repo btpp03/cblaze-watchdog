@@ -50,6 +50,30 @@ FP = {
 COMMIT_FIELDS = ["cf", "wv", "wr", "ff", "af", "pl", "tz", "sw", "sh", "cd", "hc"]
 
 
+def randomize_fp():
+    """每次解挑战都换一套指纹。
+
+    服务端会按提交的 cf/wv/wr/ff/af/pl/tz/sw/sh/cd/hc 重算 commit，
+    所以这些值本来就可以变；而**长期用同一套指纹反复提交**会被判 bot，
+    返回 403「Вы слишком подозрительны, и ваш запрос был отклонён」。
+    """
+    import random
+    f = dict(FP)
+    f["cf"] = "%08x" % random.getrandbits(32)
+    f["ff"] = "%x" % random.getrandbits(28)
+    f["af"] = "%x" % random.getrandbits(28)
+    f["sw"], f["sh"] = random.choice(
+        [("1920", "1080"), ("2560", "1440"), ("1536", "864"), ("1440", "900"), ("1366", "768")])
+    f["aw"], f["ah"] = f["sw"], str(int(f["sh"]) - 40)
+    f["hc"] = random.choice(["4", "8", "12", "16"])
+    f["dm"] = random.choice(["4", "8", "16"])
+    f["tz"] = random.choice(["Asia/Shanghai", "Europe/Moscow", "Asia/Tokyo", "Europe/Berlin", "Europe/Riga"])
+    f["ln"] = random.choice(["zh-CN,zh,en", "ru-RU,ru,en", "en-US,en", "ru-RU,ru"])
+    f["to"] = {"Europe/Moscow": "-180", "Asia/Tokyo": "-540", "Europe/Berlin": "-60",
+               "Europe/Riga": "-120"}.get(f["tz"], "-480")
+    return f
+
+
 def _open(op, url, data=None, headers=None, timeout=45):
     req = urllib.request.Request(url, data=data, method="POST" if data else "GET")
     req.add_header("User-Agent", UA)
@@ -74,14 +98,15 @@ def solve(op, base: str, path: str = "/", max_rounds: int = 3):
             return code, body
         sid, non, dif = m.group(1), m.group(2), int(m.group(3))
         t0 = time.time()
-        commit = sha256_hex("|".join(str(FP[f]) for f in COMMIT_FIELDS))
+        fp = randomize_fp()
+        commit = sha256_hex("|".join(str(fp[f]) for f in COMMIT_FIELDS))
         n = 0
         prefix = "0" * dif
         while True:
             if sha256_hex(f"{sid}:{non}:{commit}:{n}").startswith(prefix):
                 break
             n += 1
-        payload = dict(FP)
+        payload = dict(fp)
         payload.update({
             "sid": sid, "pow": sha256_hex(f"{sid}:{non}:{commit}:{n}"), "pn": str(n),
             "et": str(max(1200, int((time.time() - t0) * 1000))),
