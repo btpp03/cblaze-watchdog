@@ -118,13 +118,39 @@ def _api_raw(op, xsrf, path, method="GET", body=None):
 
 
 def mc_alive():
+    """真·服务端判活：走 Minecraft status 握手，能拿到 JSON 才算活着。
+
+    只做 TCP connect 会误判 —— 端口半开、边车占端口、容器刚被杀时都能连上。
+    """
+    import struct
+
+    def varint(n):
+        out = b""
+        while True:
+            b = n & 0x7F
+            n >>= 7
+            out += bytes([b | (0x80 if n else 0)])
+            if not n:
+                return out
+
     try:
         s = socket.create_connection((HOST, PORT), timeout=12)
-        s.close()
-        return True
     except Exception as e:
-        log("tcp probe failed:", e)
+        log("mc connect failed:", e)
         return False
+    try:
+        host = HOST.encode()
+        pkt = varint(0) + varint(776) + varint(len(host)) + host + struct.pack(">H", PORT) + varint(1)
+        s.sendall(varint(len(pkt)) + pkt)
+        s.sendall(varint(1) + varint(0))
+        time.sleep(0.8)
+        data = s.recv(4096)
+    except Exception as e:
+        log("mc status failed:", e)
+        return False
+    finally:
+        s.close()
+    return b"description" in data or b"version" in data
 
 
 def state_of(op, xsrf):
@@ -149,19 +175,23 @@ def main():
         return 4
 
     alive = mc_alive()
-    log(f"panel state={st} mem={mem} | mc_port={'up' if alive else 'DOWN'}")
+    log(f"panel state={st} mem={mem} | mc_status={'OK' if alive else 'DOWN'}")
 
-    if st == "running" and alive:
-        log("OK 无需动作")
-        print(f"result: ok state=running mc=up mem={mem}")
+    # 以 MC 状态握手为准：面板 current_state 会失步（明明在跑却报 offline），
+    # 之前就是信了面板把好好的服 kill 掉了。
+    if alive:
+        if st != "running":
+            log(f"面板报 {st} 但 MC 实际可玩 —— 状态失步，不动作")
+        else:
+            log("OK 无需动作")
+        print(f"result: ok mc=up panel_state={st} mem={mem}")
         return 0
 
     if st == "running" and not alive:
         # 可能在重启中，再等一轮
-        log("state=running 但端口不通，等 60s 复查")
+        log("state=running 但 MC 不响应，等 60s 复查")
         time.sleep(60)
-        alive = mc_alive()
-        if alive:
+        if mc_alive():
             log("恢复，无需动作")
             print("result: ok recovered")
             return 0
@@ -198,9 +228,9 @@ def main():
             st2, mem2, _, _ = state_of(op, xsrf)
             al = mc_alive()
             log(f"attempt{attempt} check {i + 1}: state={st2} mem={mem2} mc={'up' if al else 'down'}")
-            if st2 == "running" and al:
+            if al:
                 # 平台会周期性把免费服关掉，拉起成功属常态 —— 只记日志不推 TG，避免每刻刷屏
-                log(f"已拉起成功（原 state={st}），静默不通知")
+                log(f"已拉起成功（原 state={st}，现 state={st2}），静默不通知")
                 print("result: restarted ok")
                 return 0
             if st2 == "starting" and not mem2:
