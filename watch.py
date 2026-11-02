@@ -166,24 +166,49 @@ def main():
             print("result: ok recovered")
             return 0
 
-    log(f"动作: power start (原 state={st})")
-    code, txt = api(op, xsrf, f"/api/client/servers/{SID}/power",
-                    method="POST", body=json.dumps({"signal": "start"}).encode())
-    log("power start ->", code, txt[:120])
+    log(f"动作: 拉起 (原 state={st} mem={mem})")
 
-    for i in range(12):  # 最多等 3 分钟
-        time.sleep(15)
-        st2, _, _, _ = state_of(op, xsrf)
-        al = mc_alive()
-        log(f"check {i + 1}: state={st2} mc={'up' if al else 'down'}")
-        if st2 == "running" and al:
-            tg(f"🔧 CloudBlaze 看门狗：免费服原本停了（state={st}），已自动重新启动 ✅\n"
-               f"MC ping 正常，hy2/哪吒随之恢复。")
-            print("result: restarted ok")
-            return 0
+    # 僵死判定：state=starting 但内存为 0 = 容器没真起来（wings 卡住）。
+    # 这时单发 start 只会一直 204 + starting，必须 kill 后重开。
+    wedged = (st == "starting" and not mem)
+    if st == "starting" and not wedged:
+        # 正常启动中（有内存），先等它自己起完
+        for _ in range(8):
+            time.sleep(15)
+            st2, mem2, _, _ = state_of(op, xsrf)
+            if st2 == "running" and mc_alive():
+                log("本来就在启动中，已就绪")
+                print("result: ok recovered")
+                return 0
+        wedged = True
 
-    tg(f"❌ CloudBlaze 看门狗：免费服停了且自动拉起失败（power HTTP {code}），请去面板手动点启动。")
-    print(f"::error::restart failed code={code}")
+    def power(sig):
+        c, t = api(op, xsrf, f"/api/client/servers/{SID}/power",
+                   method="POST", body=json.dumps({"signal": sig}).encode())
+        log(f"power {sig} ->", c, t[:80])
+        return c
+
+    for attempt in (1, 2):
+        if wedged or attempt == 2:
+            power("kill")
+            time.sleep(10)
+        power("start")
+        for i in range(14):  # 单轮最多等 3.5 分钟
+            time.sleep(15)
+            st2, mem2, _, _ = state_of(op, xsrf)
+            al = mc_alive()
+            log(f"attempt{attempt} check {i + 1}: state={st2} mem={mem2} mc={'up' if al else 'down'}")
+            if st2 == "running" and al:
+                tg(f"🔧 CloudBlaze 看门狗：免费服被停了（原 state={st}），已自动拉起 ✅\n"
+                   f"MC ping 正常，hy2/哪吒随之恢复。")
+                print("result: restarted ok")
+                return 0
+            if st2 == "starting" and not mem2:
+                wedged = True  # 这一轮又僵死了，下一轮改 kill+start
+                break
+
+    tg(f"❌ CloudBlaze 看门狗：免费服被停了且自动拉起失败（原 state={st}），请去面板手动点启动。")
+    print("::error::restart failed after 2 attempts")
     return 5
 
 
